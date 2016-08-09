@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/plugins/qgeric" >
+        <file>icon.png</file>
+        <file>resources/icon_geocode.png</file>
+        <file>resources/icon_reversegeocode.png</file>
+    </qresource>
+</RCC>

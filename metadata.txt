@@ -1,0 +1,22 @@
+[general]
+name=Gban
+qgisMinimumVersion=2.10
+description=Plugin that enables geocoding/reverse geocoding in France using the BAN API.
+version=1.0
+author=Jérémy Kalsron
+email=jeremy.kalsron@gmail.com
+
+about=GBAN is a plugin for QGis that enables geocoding/reverse geocoding in France using the BAN API (https://adresse.data.gouv.fr/api/).
+
+homepage=https://github.com/jeremyk6/gban
+tracker=https://github.com/jeremyk6/gban/issues
+repository=https://github.com/jeremyk6/gban
+
+tags=geocoding, reverse geocoding
+
+category=Plugins
+icon=icon.PNG
+
+experimental=True
+deprecated=False
+
