@@ -50,7 +50,9 @@ class Gban:
                 QCoreApplication.installTranslator(self.translator)
 
         self.iface = iface
-                
+
+        self.exclusive = QActionGroup( self.iface.mainWindow() )
+
         self.actions = []
         self.menu = '&Gban'
         self.toolbar = self.iface.addToolBar('Gban')
@@ -113,6 +115,9 @@ class Gban:
                 self.menu,
                 action)
 
+        if checkable:
+            self.exclusive.addAction( action )
+
         self.actions.append(action)
 
         return action
@@ -128,6 +133,7 @@ class Gban:
         icon_path = ":/plugins/qgeric/resources/icon_reversegeocode.png"
         self.add_action(
             icon_path,
+            checkable = True,
             text=self.tr("Reverse geocoding"),
             callback=self.reverseGeocoding,
             parent=self.iface.mainWindow()
@@ -172,6 +178,7 @@ class Gban:
             self.tool.reset()
         self.tool = selectPoint(self.iface)
         self.iface.connect(self.tool, SIGNAL("selectionDone"), self.doReverseGeocoding)
+        self.iface.connect(self.tool, SIGNAL("deactivated()"), self.uncheckReverseGeocoding)
         self.iface.mapCanvas().setMapTool(self.tool)    
         
     def doReverseGeocoding(self, point_orig):
@@ -191,3 +198,6 @@ class Gban:
                     QApplication.clipboard().setText(address)
             else:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
+
+    def uncheckReverseGeocoding(self):
+        self.exclusive.checkedAction().setChecked(False)
