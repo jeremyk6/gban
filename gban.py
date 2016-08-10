@@ -174,12 +174,11 @@ class Gban:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
     
     def reverseGeocoding(self):
-        if self.tool:
-            self.tool.reset()
-        self.tool = selectPoint(self.iface)
-        self.iface.connect(self.tool, SIGNAL("selectionDone"), self.doReverseGeocoding)
-        self.iface.connect(self.tool, SIGNAL("deactivated()"), self.uncheckReverseGeocoding)
-        self.iface.mapCanvas().setMapTool(self.tool)    
+        if self.tool == None:
+            self.tool = selectPoint(self.iface)
+            self.iface.connect(self.tool, SIGNAL("selectionDone"), self.doReverseGeocoding)
+            self.iface.connect(self.tool, SIGNAL("deactivated()"), self.uncheckReverseGeocoding)
+            self.iface.mapCanvas().setMapTool(self.tool)
         
     def doReverseGeocoding(self, point_orig):
         transform = QgsCoordinateTransform(self.iface.mapCanvas().mapRenderer().destinationCrs(), QgsCoordinateReferenceSystem(4326))
@@ -200,4 +199,6 @@ class Gban:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
 
     def uncheckReverseGeocoding(self):
-        self.exclusive.checkedAction().setChecked(False)
+        if self.tool:
+            self.tool = None
+            self.exclusive.checkedAction().setChecked(False)

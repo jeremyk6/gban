@@ -15,6 +15,3 @@ class selectPoint(QgsMapTool):
       if e.button() == Qt.LeftButton:
          cp = self.toMapCoordinates(QPoint(e.pos().x(), e.pos().y()))
          self.emit( SIGNAL("selectionDone"), cp)
-  
-  def reset(self):
-    pass
