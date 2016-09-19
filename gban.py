@@ -17,14 +17,14 @@
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4.QtCore import SIGNAL, QTranslator
-from PyQt4.QtGui import QAction, QIcon, QColor, QApplication, QMessageBox, QDialogButtonBox
+from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
+from PyQt4.QtGui import (QAction, QActionGroup, QApplication, QColor, QDialogButtonBox,
+                            QIcon, QInputDialog, QMessageBox)
 
 from qgis.core import *
 from qgis.gui import *
-from osgeo import ogr
 
-from selectTools import *
+
 import urllib2
 import json
 import unicodedata
@@ -50,6 +50,7 @@ class Gban:
                 QCoreApplication.installTranslator(self.translator)
 
         self.iface = iface
+        self.canvas = self.iface.mapCanvas()
 
         self.exclusive = QActionGroup( self.iface.mainWindow() )
 
@@ -58,7 +59,11 @@ class Gban:
         self.toolbar = self.iface.addToolBar('Gban')
         self.toolbar.setObjectName('Gban')
         
-        self.tool = None
+        #Select tool initialization
+        self.tool = QgsMapToolEmitPoint(self.canvas)
+        self.tool.canvasClicked.connect(self.doReverseGeocoding)
+        self.tool.deactivated.connect(self.uncheckReverseGeocoding)
+
         self.rb = QgsRubberBand(self.iface.mapCanvas(), QGis.Point)
         self.rb.setColor( QColor(255, 0, 0) )
         self.rb.setWidth( 5 )
@@ -174,11 +179,7 @@ class Gban:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
     
     def reverseGeocoding(self):
-        if self.tool == None:
-            self.tool = selectPoint(self.iface)
-            self.iface.connect(self.tool, SIGNAL("selectionDone"), self.doReverseGeocoding)
-            self.iface.connect(self.tool, SIGNAL("deactivated()"), self.uncheckReverseGeocoding)
-            self.iface.mapCanvas().setMapTool(self.tool)
+        self.canvas.setMapTool(self.tool)
         
     def doReverseGeocoding(self, point_orig):
         transform = QgsCoordinateTransform(self.iface.mapCanvas().mapRenderer().destinationCrs(), QgsCoordinateReferenceSystem(4326))
@@ -199,6 +200,4 @@ class Gban:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
 
     def uncheckReverseGeocoding(self):
-        if self.tool:
-            self.tool = None
-            self.exclusive.checkedAction().setChecked(False)
+        self.exclusive.checkedAction().setChecked(False)
