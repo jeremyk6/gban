@@ -21,8 +21,8 @@ from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
 from PyQt4.QtGui import (QAction, QActionGroup, QApplication, QColor, QDialogButtonBox,
                             QIcon, QInputDialog, QMessageBox)
 
-from qgis.core import *
-from qgis.gui import *
+from qgis.core import QGis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPoint
+from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand
 
 
 import urllib2
@@ -147,7 +147,7 @@ class Gban:
     def geocoding(self):
         self.rb.reset( QGis.Point )
         address, ok = QInputDialog.getText(self.iface.mainWindow(), self.tr("Address"), self.tr("Input address to geocode:"))
-        if ok:
+        if ok and address:
             self.doGeocoding(address)
             
     def doGeocoding(self, address):
@@ -170,7 +170,8 @@ class Gban:
                     x = features[index]["geometry"]["coordinates"][0]
                     y = features[index]["geometry"]["coordinates"][1]
                     point_4326 = QgsPoint(x, y)
-                    transform = QgsCoordinateTransform(QgsCoordinateReferenceSystem(4326), self.iface.mapCanvas().mapRenderer().destinationCrs())
+                    transform = QgsCoordinateTransform(QgsCoordinateReferenceSystem(4326), 
+                                                        self.canvas.mapSettings().destinationCrs())
                     point_2154 = transform.transform(point_4326)
                     self.rb.addPoint(point_2154)
                     self.iface.mapCanvas().setCenter(point_2154)
@@ -182,7 +183,8 @@ class Gban:
         self.canvas.setMapTool(self.tool)
         
     def doReverseGeocoding(self, point_orig):
-        transform = QgsCoordinateTransform(self.iface.mapCanvas().mapRenderer().destinationCrs(), QgsCoordinateReferenceSystem(4326))
+        transform = QgsCoordinateTransform(self.canvas.mapSettings().destinationCrs(), 
+                                            QgsCoordinateReferenceSystem(4326))
         point_4326 = transform.transform(point_orig)
         url = "http://api-adresse.data.gouv.fr/reverse/?lon="+str(point_4326.x())+"&lat="+str(point_4326.y())
         try:
