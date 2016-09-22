@@ -17,11 +17,14 @@
 #You should have received a copy of the GNU General Public License
 #along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
+from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QUrl, QEventLoop
 from PyQt4.QtGui import (QAction, QActionGroup, QApplication, QColor, QDialogButtonBox,
                             QIcon, QInputDialog, QMessageBox)
 
-from qgis.core import QGis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsPoint
+from PyQt4.QtNetwork import QNetworkRequest, QNetworkReply 
+
+from qgis.core import (QGis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, 
+                        QgsNetworkAccessManager, QgsPoint)
 from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand
 
 
@@ -69,14 +72,7 @@ class Gban:
         self.rb.setWidth( 5 )
         
         # Network configuration
-        settings = QSettings()
-        proxyEnabled = settings.value("proxy/proxyEnabled", "")
-        proxyHost = settings.value("proxy/proxyHost", "" )
-        proxyPort = settings.value("proxy/proxyPort", "" )
-        if proxyEnabled == "true":
-            proxy_handler = urllib2.ProxyHandler({'http': proxyHost+':'+proxyPort})
-            opener = urllib2.build_opener(proxy_handler)
-            urllib2.install_opener(opener)
+        self.manager = QgsNetworkAccessManager.instance()
                                    
     def unload(self):
         for action in self.actions:
@@ -149,16 +145,15 @@ class Gban:
         address, ok = QInputDialog.getText(self.iface.mainWindow(), self.tr("Address"), self.tr("Input address to geocode:"))
         if ok and address:
             self.doGeocoding(address)
-            
+         
     def doGeocoding(self, address):
         address = unicodedata.normalize('NFKD', unicode(address)).encode('ASCII', 'ignore')
         url = "http://api-adresse.data.gouv.fr/search/?q="+address.replace(" ", "%20")
+        
+        result = self.request(url)
+
         try:
-            result = urllib2.urlopen(url)
-        except IOError:
-            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
-        else:
-            data = json.loads(result.read())
+            data = json.loads(result)
             features = data["features"]
             if len(features) > 0:
                 feature_list = []
@@ -178,6 +173,9 @@ class Gban:
                     self.iface.mapCanvas().refresh()
             else:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
+        except ValueError:
+            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
+
     
     def reverseGeocoding(self):
         self.canvas.setMapTool(self.tool)
@@ -187,12 +185,12 @@ class Gban:
                                             QgsCoordinateReferenceSystem(4326))
         point_4326 = transform.transform(point_orig)
         url = "http://api-adresse.data.gouv.fr/reverse/?lon="+str(point_4326.x())+"&lat="+str(point_4326.y())
+
+        result = self.request(url)
+
         try:
-            result = urllib2.urlopen(url)
-        except IOError:
-            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
-        else:
-            data = json.loads(result.read())
+            data = json.loads(result)
+            
             if len(data["features"]) > 0:
                 address = data["features"][0]["properties"]["label"]
                 clicked = QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), address, QDialogButtonBox.Ok, QDialogButtonBox.Save)
@@ -200,6 +198,19 @@ class Gban:
                     QApplication.clipboard().setText(address)
             else:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
+        except ValueError:
+            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
 
     def uncheckReverseGeocoding(self):
         self.exclusive.checkedAction().setChecked(False)
+
+    def request(self, url):
+        ''' prepare the request and return the result of the reply
+        '''
+        request = QNetworkRequest(QUrl(url))
+        reply = self.manager.get(request)
+        reply.deleteLater()
+        evloop = QEventLoop()
+        reply.finished.connect(evloop.quit)
+        evloop.exec_(QEventLoop.ExcludeUserInputEvents)
+        return unicode(reply.readAll())
