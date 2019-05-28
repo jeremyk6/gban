@@ -1,5 +1,5 @@
 <RCC>
-    <qresource prefix="/plugins/qgeric" >
+    <qresource prefix="/plugins/gban" >
         <file>icon.png</file>
         <file>resources/icon_geocode.png</file>
         <file>resources/icon_reversegeocode.png</file>

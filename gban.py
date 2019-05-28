@@ -14,25 +14,21 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 #
-#You should have received a copy of the GNU General Public License
-#along with this program.  If not, see <http://www.gnu.org/licenses/>.
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from PyQt4.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QUrl, QEventLoop
-from PyQt4.QtGui import (QAction, QActionGroup, QApplication, QColor, QDialogButtonBox,
-                            QIcon, QInputDialog, QMessageBox)
+from qgis.PyQt.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QUrl, QEventLoop
+from qgis.PyQt.QtGui import QColor, QIcon
+from qgis.PyQt.QtWidgets import QAction, QActionGroup, QApplication, QDialogButtonBox, QInputDialog, QMessageBox
 
-from PyQt4.QtNetwork import QNetworkRequest, QNetworkReply 
-
-from qgis.core import (QGis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, 
-                        QgsNetworkAccessManager, QgsPoint)
+from qgis.core import (QgsWkbTypes, QgsCoordinateReferenceSystem, QgsCoordinateTransform, 
+                        QgsNetworkContentFetcher, QgsPoint, QgsProject)
 from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand
 
-
-import urllib2
 import json
 import unicodedata
 
-import resources
+from . import resources
 import os
 
 class Gban:
@@ -67,12 +63,9 @@ class Gban:
         self.tool.canvasClicked.connect(self.doReverseGeocoding)
         self.tool.deactivated.connect(self.uncheckReverseGeocoding)
 
-        self.rb = QgsRubberBand(self.iface.mapCanvas(), QGis.Point)
+        self.rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.PointGeometry)
         self.rb.setColor( QColor(255, 0, 0) )
         self.rb.setWidth( 5 )
-        
-        # Network configuration
-        self.manager = QgsNetworkAccessManager.instance()
                                    
     def unload(self):
         for action in self.actions:
@@ -124,14 +117,14 @@ class Gban:
         return action
 
     def initGui(self):
-        icon_path = ":/plugins/qgeric/resources/icon_geocode.png"
+        icon_path = ":/plugins/gban/resources/icon_geocode.png"
         self.add_action(
             icon_path,
             text=self.tr("Geocoding"),
             callback=self.geocoding,
             parent=self.iface.mainWindow()
         )
-        icon_path = ":/plugins/qgeric/resources/icon_reversegeocode.png"
+        icon_path = ":/plugins/gban/resources/icon_reversegeocode.png"
         self.add_action(
             icon_path,
             checkable = True,
@@ -141,13 +134,13 @@ class Gban:
         )
         
     def geocoding(self):
-        self.rb.reset( QGis.Point )
+        self.rb.reset(QgsWkbTypes.PointGeometry)
         address, ok = QInputDialog.getText(self.iface.mainWindow(), self.tr("Address"), self.tr("Input address to geocode:"))
         if ok and address:
             self.doGeocoding(address)
          
     def doGeocoding(self, address):
-        address = unicodedata.normalize('NFKD', unicode(address)).encode('ASCII', 'ignore')
+        address = unicodedata.normalize('NFKD', unicode(address))
         url = "http://api-adresse.data.gouv.fr/search/?q="+address.replace(" ", "%20")
         
         result = self.request(url)
@@ -164,12 +157,11 @@ class Gban:
                     index = feature_list.index(feature)
                     x = features[index]["geometry"]["coordinates"][0]
                     y = features[index]["geometry"]["coordinates"][1]
-                    point_4326 = QgsPoint(x, y)
                     transform = QgsCoordinateTransform(QgsCoordinateReferenceSystem(4326), 
-                                                        self.canvas.mapSettings().destinationCrs())
-                    point_2154 = transform.transform(point_4326)
-                    self.rb.addPoint(point_2154)
-                    self.iface.mapCanvas().setCenter(point_2154)
+                                                        self.canvas.mapSettings().destinationCrs(), QgsProject().instance())
+                    point = transform.transform(x, y)
+                    self.rb.addPoint(point)
+                    self.iface.mapCanvas().setCenter(point)
                     self.iface.mapCanvas().refresh()
             else:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
@@ -182,9 +174,9 @@ class Gban:
         
     def doReverseGeocoding(self, point_orig):
         transform = QgsCoordinateTransform(self.canvas.mapSettings().destinationCrs(), 
-                                            QgsCoordinateReferenceSystem(4326))
-        point_4326 = transform.transform(point_orig)
-        url = "http://api-adresse.data.gouv.fr/reverse/?lon="+str(point_4326.x())+"&lat="+str(point_4326.y())
+                                            QgsCoordinateReferenceSystem(4326), QgsProject().instance())
+        point = transform.transform(point_orig)
+        url = "http://api-adresse.data.gouv.fr/reverse/?lon="+str(point.x())+"&lat="+str(point.y())
 
         result = self.request(url)
 
@@ -193,8 +185,8 @@ class Gban:
             
             if len(data["features"]) > 0:
                 address = data["features"][0]["properties"]["label"]
-                clicked = QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), address, QDialogButtonBox.Ok, QDialogButtonBox.Save)
-                if clicked == QDialogButtonBox.Save:
+                clicked = QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), address, QMessageBox.Ok, QMessageBox.Save)
+                if clicked == QMessageBox.Save:
                     QApplication.clipboard().setText(address)
             else:
                 QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
@@ -207,10 +199,9 @@ class Gban:
     def request(self, url):
         ''' prepare the request and return the result of the reply
         '''
-        request = QNetworkRequest(QUrl(url))
-        reply = self.manager.get(request)
-        reply.deleteLater()
+        fetcher = QgsNetworkContentFetcher()
+        fetcher.fetchContent(QUrl(url))
         evloop = QEventLoop()
-        reply.finished.connect(evloop.quit)
+        fetcher.finished.connect(evloop.quit)
         evloop.exec_(QEventLoop.ExcludeUserInputEvents)
-        return unicode(reply.readAll())
+        return fetcher.contentAsString()
