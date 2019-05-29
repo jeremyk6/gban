@@ -17,18 +17,15 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from qgis.PyQt.QtCore import QSettings, QTranslator, qVersion, QCoreApplication, QUrl, QEventLoop
+from qgis.PyQt.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
 from qgis.PyQt.QtGui import QColor, QIcon
-from qgis.PyQt.QtWidgets import QAction, QActionGroup, QApplication, QDialogButtonBox, QInputDialog, QMessageBox
+from qgis.PyQt.QtWidgets import QAction, QActionGroup, QInputDialog, QMessageBox
 
-from qgis.core import (QgsWkbTypes, QgsCoordinateReferenceSystem, QgsCoordinateTransform, 
-                        QgsNetworkContentFetcher, QgsPoint, QgsProject)
+from qgis.core import QgsWkbTypes, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsApplication, QgsProject
 from qgis.gui import QgsMapToolEmitPoint, QgsRubberBand
 
-import json
-import unicodedata
-
 from . import resources
+from . import ban
 import os
 
 class Gban:
@@ -57,11 +54,8 @@ class Gban:
         self.menu = '&Gban'
         self.toolbar = self.iface.addToolBar('Gban')
         self.toolbar.setObjectName('Gban')
-        
-        #Select tool initialization
-        self.tool = QgsMapToolEmitPoint(self.canvas)
-        self.tool.canvasClicked.connect(self.doReverseGeocoding)
-        self.tool.deactivated.connect(self.uncheckReverseGeocoding)
+
+        self.gpsToMapTransform = QgsCoordinateTransform(QgsCoordinateReferenceSystem(4326), self.canvas.mapSettings().destinationCrs(), QgsProject().instance())
 
         self.rb = QgsRubberBand(self.iface.mapCanvas(), QgsWkbTypes.PointGeometry)
         self.rb.setColor( QColor(255, 0, 0) )
@@ -132,76 +126,43 @@ class Gban:
             callback=self.reverseGeocoding,
             parent=self.iface.mainWindow()
         )
+        self.tool = QgsMapToolEmitPoint(self.canvas)
+        self.tool.setAction(self.actions[1])
+        self.tool.canvasClicked.connect(self.reverseGeocoding)
         
     def geocoding(self):
         self.rb.reset(QgsWkbTypes.PointGeometry)
         address, ok = QInputDialog.getText(self.iface.mainWindow(), self.tr("Address"), self.tr("Input address to geocode:"))
         if ok and address:
-            self.doGeocoding(address)
-         
-    def doGeocoding(self, address):
-        address = unicodedata.normalize('NFKD', unicode(address))
-        url = "http://api-adresse.data.gouv.fr/search/?q="+address.replace(" ", "%20")
-        
-        result = self.request(url)
-
-        try:
-            data = json.loads(result)
-            features = data["features"]
-            if len(features) > 0:
-                feature_list = []
-                for feature in features:
-                    feature_list.append(feature["properties"]["label"]+" - "+str(round(feature["properties"]["score"]*100))+"%")
-                feature, ok = QInputDialog.getItem(self.iface.mainWindow(), self.tr("Result"), "", feature_list)
-                if ok:
-                    index = feature_list.index(feature)
-                    x = features[index]["geometry"]["coordinates"][0]
-                    y = features[index]["geometry"]["coordinates"][1]
-                    transform = QgsCoordinateTransform(QgsCoordinateReferenceSystem(4326), 
-                                                        self.canvas.mapSettings().destinationCrs(), QgsProject().instance())
-                    point = transform.transform(x, y)
-                    self.rb.addPoint(point)
-                    self.iface.mapCanvas().setCenter(point)
-                    self.iface.mapCanvas().refresh()
-            else:
-                QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
-        except ValueError:
-            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
-
+            try:
+                results = ban.geocode(address)
+                if len(results) > 0:
+                    items = ["%s - %s%%"%(result["address"],result["score"]) for result in results]
+                    print(items)
+                    item, ok = QInputDialog.getItem(self.iface.mainWindow(), self.tr("Result"), "", items)
+                    if ok:
+                        index = items.index(item)
+                        point = self.gpsToMapTransform.transform(results[index]["point"], QgsCoordinateTransform.ForwardTransform)
+                        self.rb.addPoint(point)
+                        self.iface.mapCanvas().setCenter(point)
+                        self.iface.mapCanvas().refresh()
+                else:
+                    QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
+            except ValueError:
+                QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
     
-    def reverseGeocoding(self):
-        self.canvas.setMapTool(self.tool)
-        
-    def doReverseGeocoding(self, point_orig):
-        transform = QgsCoordinateTransform(self.canvas.mapSettings().destinationCrs(), 
-                                            QgsCoordinateReferenceSystem(4326), QgsProject().instance())
-        point = transform.transform(point_orig)
-        url = "http://api-adresse.data.gouv.fr/reverse/?lon="+str(point.x())+"&lat="+str(point.y())
-
-        result = self.request(url)
-
-        try:
-            data = json.loads(result)
-            
-            if len(data["features"]) > 0:
-                address = data["features"][0]["properties"]["label"]
-                clicked = QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), address, QMessageBox.Ok, QMessageBox.Save)
-                if clicked == QMessageBox.Save:
-                    QApplication.clipboard().setText(address)
-            else:
-                QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
-        except ValueError:
-            QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
-
-    def uncheckReverseGeocoding(self):
-        self.exclusive.checkedAction().setChecked(False)
-
-    def request(self, url):
-        ''' prepare the request and return the result of the reply
-        '''
-        fetcher = QgsNetworkContentFetcher()
-        fetcher.fetchContent(QUrl(url))
-        evloop = QEventLoop()
-        fetcher.finished.connect(evloop.quit)
-        evloop.exec_(QEventLoop.ExcludeUserInputEvents)
-        return fetcher.contentAsString()
+    def reverseGeocoding(self, mapPoint):
+        if self.canvas.mapTool() != self.tool: 
+            self.canvas.setMapTool(self.tool)
+        else:
+            point = self.gpsToMapTransform.transform(mapPoint, QgsCoordinateTransform.ReverseTransform)
+            try:
+                result = ban.reverseGeocode(point)         
+                if result:
+                    clicked = QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), result, QMessageBox.Ok, QMessageBox.Save)
+                    if clicked == QMessageBox.Save:
+                        QgsApplication.clipboard().setText(result)
+                else:
+                    QMessageBox.information(self.iface.mainWindow(), self.tr("Result"), self.tr("No result."))
+            except ValueError:
+                QMessageBox.critical(self.iface.mainWindow(), self.tr("Error"), self.tr("An error occured. Check your network settings (proxy)."))
